@@ -1,0 +1,411 @@
+import { defineStore } from 'pinia'
+import { computed, ref, watch } from 'vue'
+
+import {
+  getConfigs,
+  setConfigs,
+  getProxies,
+  onLogs,
+  onMemory,
+  onTraffic,
+  onConnections,
+  initWebsocket,
+  destroyWebsocket,
+  probeApiAvailability,
+} from '@/api/kernel'
+import { ProcessInfo, KillProcess, ExecBackground, ReadFile, RemoveFile, ProbeAPI } from '@/bridge'
+import { CoreLogFilePath, CorePidFilePath, CoreWorkingDirectory } from '@/constant/kernel'
+import { Branch } from '@/enums/app'
+import { RuleType } from '@/enums/kernel'
+import {
+  useAppSettingsStore,
+  useProfilesStore,
+  useLogsStore,
+  useEnvStore,
+  usePluginsStore,
+  useSubscribesStore,
+  useRulesetsStore,
+} from '@/stores'
+import {
+  generateConfigFile,
+  updateTrayAndMenus,
+  getKernelFileName,
+  normalizeProxyHost,
+  message,
+  getKernelRuntimeArgs,
+  getKernelRuntimeEnv,
+  eventBus,
+  sleep,
+} from '@/utils'
+
+import type { CoreApiConfig, CoreApiProxy } from '@/types/kernel'
+
+export type ProxyType = 'mixed' | 'http' | 'socks'
+export type ProxyEndpoint = {
+  schema: 'http' | 'socks5'
+  host: string
+  port: number
+  username: string
+  password: string
+  proxyType: ProxyType
+}
+
+export const useKernelApiStore = defineStore('kernelApi', () => {
+  const envStore = useEnvStore()
+  const logsStore = useLogsStore()
+  const pluginsStore = usePluginsStore()
+  const profilesStore = useProfilesStore()
+  const subscribesStore = useSubscribesStore()
+  const rulesetsStore = useRulesetsStore()
+  const appSettingsStore = useAppSettingsStore()
+
+  /** RESTful API */
+  const config = ref<CoreApiConfig>({
+    port: 0,
+    'socks-port': 0,
+    'mixed-port': 0,
+    'interface-name': '',
+    'allow-lan': false,
+    mode: '',
+    tun: {
+      enable: false,
+      stack: '',
+      device: '',
+    },
+  })
+
+  const proxies = ref<Record<string, CoreApiProxy>>({})
+
+  const refreshConfig = async () => {
+    config.value = await getConfigs()
+  }
+
+  const resetConfig = () => {
+    config.value.port = 0
+    config.value['socks-port'] = 0
+    config.value['mixed-port'] = 0
+    config.value['interface-name'] = ''
+    config.value['allow-lan'] = false
+    config.value.mode = ''
+    config.value.tun.enable = false
+    config.value.tun.stack = ''
+    config.value.tun.device = ''
+  }
+
+  const updateConfig = async (options: Record<string, any>) => {
+    await setConfigs(options)
+    await refreshConfig()
+  }
+
+  const refreshProviderProxies = async () => {
+    const { proxies: b } = await getProxies()
+    proxies.value = b
+  }
+
+  /* Bridge API */
+  const corePid = ref(-1)
+  const running = ref(false)
+  const starting = ref(false)
+  const stopping = ref(false)
+  const restarting = ref(false)
+  const needRestart = ref(false)
+  const coreStateLoading = ref(true)
+  let isCoreStartedByThisInstance = false
+  let { promise: coreStoppedPromise, resolve: coreStoppedResolver } = Promise.withResolvers()
+
+  const initCoreState = async () => {
+    corePid.value = Number(await ReadFile(CorePidFilePath).catch(() => -1))
+    const processName = corePid.value === -1 ? '' : await ProcessInfo(corePid.value).catch(() => '')
+    running.value = processName.startsWith('mihomo')
+
+    coreStateLoading.value = false
+
+    if (running.value) {
+      initWebsocket()
+      await Promise.all([refreshConfig(), refreshProviderProxies()])
+      await envStore.updateSystemProxyStatus()
+    } else if (appSettingsStore.app.autoStartKernel) {
+      await startCore()
+    }
+  }
+
+  const runCoreProcess = async (isAlpha: boolean, tunEnabled: boolean) => {
+    let stopped = false
+    const pid = await ExecBackground(
+      CoreWorkingDirectory + '/' + getKernelFileName(isAlpha),
+      getKernelRuntimeArgs(isAlpha),
+      undefined,
+      async (end) => {
+        stopped = true
+        const logs = await ReadFile(CoreLogFilePath, { Range: '-4096' }).catch((err) => String(err))
+        logs.split('\n').forEach((line: string) => line && logsStore.recordKernelLog(line))
+        end && logsStore.recordKernelLog(end)
+        onCoreStopped()
+      },
+      {
+        PidFile: CorePidFilePath,
+        LogFile: CoreLogFilePath,
+        Env: getKernelRuntimeEnv(isAlpha),
+      },
+    )
+    const controller = profilesStore.currentProfile?.advancedConfig['external-controller'] || '127.0.0.1:20113'
+    const secret = profilesStore.currentProfile?.advancedConfig.secret || ''
+    const parts = controller.split(':')
+    const port = parts[parts.length - 1] || '20113'
+    const probeUrl = `http://127.0.0.1:${port}/version`
+
+    while (!stopped) {
+      const ok = await ProbeAPI(probeUrl, secret).catch(() => false)
+      if (ok) break
+      if (stopped) throw 'Startup failed. Check logs for details.'
+      await sleep(500)
+    }
+    return pid
+  }
+
+  const onCoreStarted = async (pid: number) => {
+    corePid.value = pid
+    running.value = true
+    needRestart.value = false
+    isCoreStartedByThisInstance = true
+    coreStoppedPromise = new Promise((r) => (coreStoppedResolver = r))
+
+    initWebsocket()
+    await Promise.all([refreshConfig(), refreshProviderProxies()])
+
+    if (appSettingsStore.app.autoSetSystemProxy) {
+      await envStore.setSystemProxy().catch((err) => message.error(err))
+    }
+    await envStore.updateSystemProxyStatus()
+
+    await pluginsStore.onCoreStartedTrigger()
+  }
+
+  const onCoreStopped = async () => {
+    if (!isCoreStartedByThisInstance) {
+      await RemoveFile(CorePidFilePath)
+    }
+
+    corePid.value = -1
+    running.value = false
+    needRestart.value = false
+
+    destroyWebsocket()
+
+    await envStore.updateSystemProxyStatus()
+    if (envStore.systemProxy) {
+      await envStore.clearSystemProxy()
+    }
+
+    resetConfig()
+
+    await pluginsStore.onCoreStoppedTrigger()
+
+    coreStoppedResolver(null)
+  }
+
+  const startCore = async () => {
+    if (running.value) throw 'The core is already running'
+
+    logsStore.clearKernelLog()
+
+    const { profile: profileID, branch } = appSettingsStore.app.kernel
+    const profile = profilesStore.getProfileById(profileID)
+    if (!profile) throw 'Choose a profile first'
+
+    starting.value = true
+    try {
+      await generateConfigFile(profile, (config) =>
+        pluginsStore.onBeforeCoreStartTrigger(config, profile),
+      )
+      const isAlpha = branch === Branch.Alpha
+      const pid = await runCoreProcess(isAlpha, profile.tunConfig.enable)
+      pid && (await onCoreStarted(pid))
+    } finally {
+      starting.value = false
+    }
+  }
+
+  const stopCore = async () => {
+    if (!running.value) throw 'The core is not running'
+
+    stopping.value = true
+    try {
+      await pluginsStore.onBeforeCoreStopTrigger()
+      await KillProcess(corePid.value)
+      await (isCoreStartedByThisInstance ? coreStoppedPromise : onCoreStopped())
+    } finally {
+      stopping.value = false
+    }
+  }
+
+  const restartCore = async (cleanupTask?: () => Promise<any>) => {
+    restarting.value = true
+    try {
+      await stopCore()
+      await cleanupTask?.()
+      await startCore()
+    } finally {
+      needRestart.value = false
+      restarting.value = false
+    }
+  }
+
+  const getProxyProfileOptions = () => {
+    const controller = profilesStore.currentProfile?.advancedConfig['external-controller']?.trim()
+    const auth = profilesStore.currentProfile?.advancedConfig.authentication[0]?.trim()
+    const rawHost = controller?.startsWith('[')
+      ? controller.match(/^\[([^\]]+)\](?::\d+)?$/)?.[1]
+      : controller?.slice(0, Math.max(controller.lastIndexOf(':'), 0)) || controller
+    const host = normalizeProxyHost(rawHost?.trim() || '')
+
+    if (!auth) return { host, username: '', password: '' }
+
+    const [username, ...passwordParts] = auth.split(':')
+
+    return {
+      host,
+      username: username || '',
+      password: passwordParts.join(':'),
+    }
+  }
+
+  const getProxyEndpoint = (): ProxyEndpoint | undefined => {
+    const { port, 'socks-port': socksPort, 'mixed-port': mixedPort } = config.value
+    const { host, username, password } = getProxyProfileOptions()
+    let targetPort = 0
+    let proxyType: ProxyType | undefined
+
+    if (mixedPort) {
+      targetPort = mixedPort
+      proxyType = 'mixed'
+    } else if (port) {
+      targetPort = port
+      proxyType = 'http'
+    } else if (socksPort) {
+      targetPort = socksPort
+      proxyType = 'socks'
+    } else {
+      return undefined
+    }
+
+    const schema = proxyType === 'socks' ? 'socks5' : 'http'
+
+    return {
+      schema,
+      host,
+      port: targetPort,
+      username,
+      password,
+      proxyType,
+    }
+  }
+
+  eventBus.on('profileChange', ({ id }) => {
+    if (running.value && id === appSettingsStore.app.kernel.profile) {
+      needRestart.value = true
+    }
+  })
+
+  eventBus.on('subscriptionChange', ({ id }) => {
+    if (running.value && profilesStore.currentProfile) {
+      const inUse = profilesStore.currentProfile.proxyGroupsConfig.some(
+        (group) => group.use.includes(id) || group.proxies.some((proxy) => proxy.type === id),
+      )
+      if (inUse) {
+        needRestart.value = true
+      }
+    }
+  })
+
+  eventBus.on('subscriptionsChange', () => {
+    if (running.value && profilesStore.currentProfile) {
+      const enabledSubs = subscribesStore.subscribes.flatMap((v) => (v.disabled ? [] : v.id))
+      const inUse = profilesStore.currentProfile.proxyGroupsConfig.some(
+        (group) =>
+          group.use.some((sub) => enabledSubs.includes(sub)) ||
+          group.proxies.some((proxy) => enabledSubs.includes(proxy.type)),
+      )
+      if (inUse) {
+        needRestart.value = true
+      }
+    }
+  })
+
+  const collectRulesetIDs = () => {
+    if (!profilesStore.currentProfile) return []
+    const l1 = Object.keys(profilesStore.currentProfile.dnsConfig['nameserver-policy']).flatMap(
+      (v) => (v.startsWith('rule-set:') ? v.slice('rule-set:'.length) : []),
+    )
+    const l2 = profilesStore.currentProfile.rulesConfig.flatMap((v) =>
+      v.type === RuleType.RuleSet ? v.payload : [],
+    )
+    return [...l1, ...l2]
+  }
+
+  eventBus.on('rulesetChange', ({ id }) => {
+    if (running.value && profilesStore.currentProfile) {
+      const inUse = collectRulesetIDs().includes(id)
+      if (inUse) {
+        needRestart.value = true
+      }
+    }
+  })
+
+  eventBus.on('rulesetsChange', () => {
+    if (running.value && profilesStore.currentProfile) {
+      const enabledRulesets = rulesetsStore.rulesets.flatMap((v) => (v.disabled ? [] : v.id))
+      const inUse = collectRulesetIDs().some((v) => enabledRulesets.includes(v))
+      if (inUse) {
+        needRestart.value = true
+      }
+    }
+  })
+
+  watch(needRestart, (v) => {
+    if (v && appSettingsStore.app.autoRestartKernel) {
+      restartCore()
+    }
+  })
+
+  const watchSources = computed(() => {
+    const source = [config.value.mode, config.value.tun.enable]
+    if (!appSettingsStore.app.addGroupToMenu) return source.join('')
+
+    const { unAvailable, sortByDelay } = appSettingsStore.app.kernel
+
+    const proxySignature = Object.values(proxies.value)
+      .map((group) => group.name + group.now)
+      .sort()
+      .join()
+
+    return source.concat([proxySignature, unAvailable, sortByDelay]).join('')
+  })
+
+  watch([watchSources, running], updateTrayAndMenus)
+
+  return {
+    startCore,
+    stopCore,
+    restartCore,
+    initCoreState,
+    pid: corePid,
+    running,
+    starting,
+    stopping,
+    restarting,
+    needRestart,
+    coreStateLoading,
+    config,
+    proxies,
+    refreshConfig,
+    updateConfig,
+    refreshProviderProxies,
+    getProxyEndpoint,
+
+    onLogs,
+    onMemory,
+    onTraffic,
+    onConnections,
+  }
+})

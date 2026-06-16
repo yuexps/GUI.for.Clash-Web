@@ -1,0 +1,20 @@
+{
+    ".url": {
+        "GUI.for.Clash.Web.Application": {
+            "title": "GUI.for.Clash.Web",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "http",
+            "gatewaySocket": "GUI-for-Clash-Web.sock",
+            "gatewayPrefix": "/app/GUI-for-Clash-Web",
+            "url": "/app/GUI-for-Clash-Web/",
+            "allUsers": false,
+            "noDisplay": false,
+            "control": {
+                "accessPerm": "readonly",
+                "portPerm": "readonly",
+                "pathPerm": "readonly"
+            }
+        }
+    }
+}

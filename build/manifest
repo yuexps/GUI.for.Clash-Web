@@ -1,0 +1,10 @@
+appname               = GUI.for.Clash.Web
+version               = 0.0.1
+display_name          = GUI.for.Clash.Web
+desc                  = Mihomo Web Client
+platform              = x86
+source                = thirdparty
+maintainer            = yuexps
+distributor           = yuexps
+desktop_uidir         = ui
+desktop_applaunchname = GUI.for.Clash.Web.Application

@@ -1,0 +1,182 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: '是否发布 Release 并更新 FnDepot'
+        required: true
+        default: false
+        type: boolean
+
+env:
+  TZ: Asia/Shanghai
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Pnpm
+        run: npm install -g pnpm
+
+      - name: Build Frontend
+        run: |
+          cd frontend
+          pnpm install
+          pnpm build
+          cd ..
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Read manifest version
+        id: manifest
+        run: |
+          VERSION=$(grep "^version" build/manifest | awk -F'"' '{print $2}')
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION}"
+
+      - name: Install fnpack
+        run: |
+          chmod +x build/fnpack-1.2.1-linux-amd64
+          sudo cp build/fnpack-1.2.1-linux-amd64 /usr/local/bin/fnpack
+
+      - name: Build and Pack x86 fpk
+        run: |
+          sed -i 's/platform.*/platform              = "x86"/g' build/manifest
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o build/app/server/GUI.for.Clash.Web .
+          cp build/app/server/GUI.for.Clash.Web ./GUI.for.Clash.Web-linux-amd64
+          cd build
+          fnpack build
+          cd ..
+          mv build/GUI.for.Clash.Web.fpk ./GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-x86.fpk
+
+      - name: Build and Pack arm fpk
+        run: |
+          sed -i 's/platform.*/platform              = "arm"/g' build/manifest
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o build/app/server/GUI.for.Clash.Web .
+          cp build/app/server/GUI.for.Clash.Web ./GUI.for.Clash.Web-linux-arm64
+          cd build
+          fnpack build
+          cd ..
+          mv build/GUI.for.Clash.Web.fpk ./GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-arm.fpk
+
+      - name: Upload x86 fpk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-x86
+          path: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-x86.fpk
+          retention-days: 30
+
+      - name: Upload arm fpk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-arm
+          path: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-arm.fpk
+          retention-days: 30
+
+      - name: Upload x86 binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GUI.for.Clash.Web-linux-amd64
+          path: GUI.for.Clash.Web-linux-amd64
+          retention-days: 30
+
+      - name: Upload arm binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GUI.for.Clash.Web-linux-arm64
+          path: GUI.for.Clash.Web-linux-arm64
+          retention-days: 30
+
+      - name: Generate changelog
+        id: changelog
+        if: ${{ inputs.publish }}
+        run: |
+          TAG="v${{ steps.manifest.outputs.version }}"
+          PREV_TAG=$(git describe --tags --abbrev=0 --exclude="$TAG" 2>/dev/null || echo "")
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          if [ -n "$PREV_TAG" ]; then
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %H %s" >> $GITHUB_OUTPUT
+          else
+            git log --pretty=format:"- %H %s" >> $GITHUB_OUTPUT
+          fi
+          echo "" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Clean existing release and tag
+        if: ${{ inputs.publish }}
+        run: |
+          TAG="v${{ steps.manifest.outputs.version }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已经存在，正在删除..."
+            gh release delete "$TAG" --yes
+          fi
+          if git ls-remote --tags origin | grep -q "refs/tags/$TAG"; then
+            echo "Git Tag $TAG 已经存在，正在删除远端 Tag..."
+            git push origin :refs/tags/"$TAG"
+          fi
+
+      - name: Create release
+        if: ${{ inputs.publish }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.manifest.outputs.version }}
+          name: v${{ steps.manifest.outputs.version }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          files: |
+            GUI.for.Clash.Web-*-x86.fpk
+            GUI.for.Clash.Web-*-arm.fpk
+            GUI.for.Clash.Web-linux-amd64
+            GUI.for.Clash.Web-linux-arm64
+          draft: false
+          prerelease: false
+
+      - name: Push to FnDepot
+        if: ${{ inputs.publish }}
+        env:
+          FnDepot_TOKEN: ${{ secrets.FnDepot_TOKEN }}
+        run: |
+          VERSION="${{ steps.manifest.outputs.version }}"
+          DOWNLOAD_URL_X86="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/GUI.for.Clash.Web-${VERSION}-x86.fpk"
+          DOWNLOAD_URL_ARM="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/GUI.for.Clash.Web-${VERSION}-arm.fpk"
+          
+          FILE_SIZE_BYTES=$(stat -c%s GUI.for.Clash.Web-${VERSION}-x86.fpk)
+          SIZE=$(awk -v size="$FILE_SIZE_BYTES" 'BEGIN {printf "%.1f", size/1024/1024}')
+          
+          git clone https://${FnDepot_TOKEN}@github.com/yuexps/FnDepot.git temp_fndepot
+          cd temp_fndepot
+          
+          jq --arg version "$VERSION" \
+             --arg size "$SIZE" \
+             --arg url_x86 "$DOWNLOAD_URL_X86" \
+             --arg url_arm "$DOWNLOAD_URL_ARM" \
+             '.["GUI.for.Clash.Web"].version = $version | 
+              .["GUI.for.Clash.Web"].size = $size | 
+              .["GUI.for.Clash.Web"].arch_diff.x86.download_url = $url_x86 | 
+              .["GUI.for.Clash.Web"].arch_diff.arm.download_url = $url_arm' \
+             fnpack.json > fnpack.json.tmp && mv fnpack.json.tmp fnpack.json
+          
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add fnpack.json
+          git commit -m "Update GUI.for.Clash.Web to v${VERSION}" || exit 0
+          git push

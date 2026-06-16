@@ -1,0 +1,106 @@
+package bridge
+
+import (
+	"context"
+	"net/http"
+)
+
+// App struct
+type App struct {
+	Ctx     context.Context
+}
+
+type EnvResult struct {
+	IsStartup    bool   `json:"-"`
+	PreventExit  bool   `json:"-"`
+	FromTaskSch  bool   `json:"-"`
+	WebviewPath  string `json:"-"`
+	AppName      string `json:"appName"`
+	AppVersion   string `json:"appVersion"`
+	BasePath     string `json:"basePath"`
+	OS           string `json:"os"`
+	ARCH         string `json:"arch"`
+	IsPrivileged bool   `json:"isPrivileged"`
+}
+
+type RequestOptions struct {
+	Proxy     string
+	Insecure  bool
+	Redirect  bool
+	Timeout   int
+	CancelId  string
+	FileField string
+}
+
+type ExecOptions struct {
+	PidFile           string
+	LogFile           string
+	StopOutputKeyword string
+	WorkingDirectory  string
+	Convert           bool
+	Env               map[string]string
+}
+
+type Range struct {
+	Start *int64
+	End   *int64
+}
+
+type IOOptions struct {
+	Mode  string // Binary / Text
+	Range string // "start-end" / "start-" / "-end"
+}
+
+type FlagResult struct {
+	Flag bool   `json:"flag"`
+	Data string `json:"data"`
+}
+
+type NetOptions struct {
+	Mode    string // Binary / Text
+	Timeout int
+}
+
+type HTTPResult struct {
+	Flag    bool        `json:"flag"`
+	Status  int         `json:"status"`
+	Headers http.Header `json:"headers"`
+	Body    string      `json:"body"`
+}
+
+type AppConfig struct {
+	WindowStartState  int  `yaml:"windowStartState"`
+	WebviewGpuPolicy  int  `yaml:"webviewGpuPolicy"`
+	ContentProtection bool `yaml:"contentProtection"`
+	Width             int  `yaml:"width"`
+	Height            int  `yaml:"height"`
+	MultipleInstance  bool `yaml:"multipleInstance"`
+	RollingRelease    bool `yaml:"rollingRelease" default:"true"`
+	StartHidden       bool
+}
+
+type TrayContent struct {
+	Icon    string `json:"icon,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Tooltip string `json:"tooltip,omitempty"`
+}
+
+type WriteTracker struct {
+	Total          int64
+	Progress       int64
+	LastEmitted    int64
+	EmitThreshold  int64
+	ProgressChange string
+	App            *App
+}
+
+type MenuItem struct {
+	Type      string     `json:"type"` // Menu Type: item / separator
+	Text      string     `json:"text"`
+	Tooltip   string     `json:"tooltip"`
+	Event     string     `json:"event"`
+	Children  []MenuItem `json:"children"`
+	Hidden    bool       `json:"hidden"`
+	Checked   bool       `json:"checked"`
+	Checkable bool       `json:"checkable"`
+}
