@@ -49,7 +49,7 @@ jobs:
       - name: Read manifest version
         id: manifest
         run: |
-          VERSION=$(grep "^version" build/manifest | awk -F'"' '{print $2}')
+          VERSION=$(grep "^version" build/manifest | sed 's/.*=\s*//;s/[" ]//g')
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Version: ${VERSION}"
 
@@ -61,8 +61,8 @@ jobs:
       - name: Build and Pack x86 fpk
         run: |
           sed -i 's/platform.*/platform              = "x86"/g' build/manifest
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o build/app/server/GUI.for.Clash.Web .
-          cp build/app/server/GUI.for.Clash.Web ./GUI.for.Clash.Web-linux-amd64
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o build/app/server/GUI-for-Clash-Web .
+          cp build/app/server/GUI-for-Clash-Web ./GUI-for-Clash-Web-linux-amd64
           cd build
           fnpack build
           cd ..
@@ -71,8 +71,8 @@ jobs:
       - name: Build and Pack arm fpk
         run: |
           sed -i 's/platform.*/platform              = "arm"/g' build/manifest
-          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o build/app/server/GUI.for.Clash.Web .
-          cp build/app/server/GUI.for.Clash.Web ./GUI.for.Clash.Web-linux-arm64
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o build/app/server/GUI-for-Clash-Web .
+          cp build/app/server/GUI-for-Clash-Web ./GUI-for-Clash-Web-linux-arm64
           cd build
           fnpack build
           cd ..
@@ -81,29 +81,29 @@ jobs:
       - name: Upload x86 fpk artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-x86
+          name: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-x86-fpk
           path: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-x86.fpk
           retention-days: 30
 
       - name: Upload arm fpk artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-arm
+          name: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-arm-fpk
           path: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-arm.fpk
           retention-days: 30
 
       - name: Upload x86 binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GUI.for.Clash.Web-linux-amd64
-          path: GUI.for.Clash.Web-linux-amd64
+          name: GUI-for-Clash-Web-linux-amd64
+          path: GUI-for-Clash-Web-linux-amd64
           retention-days: 30
 
       - name: Upload arm binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GUI.for.Clash.Web-linux-arm64
-          path: GUI.for.Clash.Web-linux-arm64
+          name: GUI-for-Clash-Web-linux-arm64
+          path: GUI-for-Clash-Web-linux-arm64
           retention-days: 30
 
       - name: Generate changelog
@@ -144,8 +144,8 @@ jobs:
           files: |
             GUI.for.Clash.Web-*-x86.fpk
             GUI.for.Clash.Web-*-arm.fpk
-            GUI.for.Clash.Web-linux-amd64
-            GUI.for.Clash.Web-linux-arm64
+            GUI-for-Clash-Web-linux-amd64
+            GUI-for-Clash-Web-linux-arm64
           draft: false
           prerelease: false
 
