@@ -272,12 +272,12 @@ func (tm *TaskManager) getProxyAddr() string {
 	userPath := resolvePath("data/user.yaml")
 	data, err := os.ReadFile(userPath)
 	if err != nil {
-		return ""
+		return "none"
 	}
 
 	var userConfig map[string]any
 	if err := yaml.Unmarshal(data, &userConfig); err != nil {
-		return ""
+		return "none"
 	}
 
 	// 兼容处理 Pinia 序列化嵌套
@@ -289,21 +289,21 @@ func (tm *TaskManager) getProxyAddr() string {
 	}
 
 	if appSettings == nil {
-		return ""
+		return "none"
 	}
 
 	mode, _ := appSettings["requestProxyMode"].(string)
 	custom, _ := appSettings["customProxy"].(string)
 
 	switch mode {
-	case "None":
-		return ""
+	case "None", "System":
+		return "none"
 	case "Custom":
 		return custom
 	case "Kernel":
 		return "http://127.0.0.1:20112"
 	}
-	return ""
+	return "none"
 }
 
 func (tm *TaskManager) updateSubscriptions(ids []string) []any {
@@ -390,8 +390,8 @@ func (tm *TaskManager) doUpdateSubscription(sub *Subscription, defaultProxy stri
 
 	proxy := defaultProxy
 	switch sub.RequestProxyMode {
-	case "None":
-		proxy = ""
+	case "None", "System":
+		proxy = "none"
 	case "Custom":
 		proxy = sub.CustomProxy
 	case "Kernel":

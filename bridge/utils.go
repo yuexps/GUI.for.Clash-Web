@@ -30,6 +30,10 @@ func resolvePath(path string) string {
 }
 
 func requestProxy(proxyAddr string) func(*http.Request) (*url.URL, error) {
+	if proxyAddr == "none" {
+		return nil
+	}
+
 	proxy := http.ProxyFromEnvironment
 
 	if proxyAddr != "" {

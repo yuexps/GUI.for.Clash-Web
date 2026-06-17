@@ -67,7 +67,7 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     exitOnClose: true,
     closeKernelOnExit: true,
     autoSetSystemProxy: false,
-    requestProxyMode: RequestProxyMode.System,
+    requestProxyMode: RequestProxyMode.None,
     customProxy: '',
     proxyBypassList: '',
     autoStartKernel: false,
@@ -133,8 +133,8 @@ export const useAppSettingsStore = defineStore('app-settings', () => {
     if (!settings.proxyBypassList) {
       settings.proxyBypassList = await GetSystemProxyBypass()
     }
-    if (!settings.requestProxyMode) {
-      settings.requestProxyMode = RequestProxyMode.System
+    if (!settings.requestProxyMode || settings.requestProxyMode === RequestProxyMode.System) {
+      settings.requestProxyMode = RequestProxyMode.None
     }
     if (settings.customProxy === undefined) {
       settings.customProxy = ''

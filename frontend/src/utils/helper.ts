@@ -154,13 +154,13 @@ export const GetRequestProxy = async (mode?: RequestProxyMode, customProxy?: str
   const appSettings = useAppSettingsStore()
   const requestProxyMode = mode ?? appSettings.app.requestProxyMode
 
-  if (requestProxyMode === RequestProxyMode.None) {
-    return ''
+  if (requestProxyMode === RequestProxyMode.None || requestProxyMode === RequestProxyMode.System) {
+    return 'none'
   }
 
   if (requestProxyMode === RequestProxyMode.Kernel) {
     const kernelProxy = useKernelApiStore().getProxyEndpoint()
-    if (!kernelProxy) return ''
+    if (!kernelProxy) return 'none'
 
     const { schema, host, port, username, password } = kernelProxy
     const formattedHost = formatProxyHost(host)
@@ -175,13 +175,7 @@ export const GetRequestProxy = async (mode?: RequestProxyMode, customProxy?: str
     return normalizeRequestProxy(customProxy ?? appSettings.app.customProxy)
   }
 
-  if (requestProxyCache.proxyPromise && Date.now() - requestProxyCache.lastAccessTime < 1000) {
-    return requestProxyCache.proxyPromise
-  }
-
-  requestProxyCache.lastAccessTime = Date.now()
-  requestProxyCache.proxyPromise = GetSystemProxy()
-  return requestProxyCache.proxyPromise
+  return 'none'
 }
 
 // Auto-start

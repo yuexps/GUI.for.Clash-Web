@@ -81,7 +81,6 @@ export const RequestMethodOptions = [
 
 export const RequestProxyModeOptions = [
   { label: 'settings.requestProxy.none', value: RequestProxyMode.None },
-  { label: 'settings.requestProxy.system', value: RequestProxyMode.System },
   { label: 'settings.requestProxy.kernel', value: RequestProxyMode.Kernel },
   { label: 'settings.requestProxy.custom', value: RequestProxyMode.Custom },
 ]
