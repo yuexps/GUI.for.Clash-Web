@@ -66,7 +66,7 @@ jobs:
           cd build
           fnpack build
           cd ..
-          mv build/GUI.for.Clash.Web.fpk ./GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-x86.fpk
+          mv build/GFCW.fpk ./GFCW-${{ steps.manifest.outputs.version }}-x86.fpk
 
       - name: Build and Pack arm fpk
         run: |
@@ -76,20 +76,20 @@ jobs:
           cd build
           fnpack build
           cd ..
-          mv build/GUI.for.Clash.Web.fpk ./GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-arm.fpk
+          mv build/GFCW.fpk ./GFCW-${{ steps.manifest.outputs.version }}-arm.fpk
 
       - name: Upload x86 fpk artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-x86-fpk
-          path: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-x86.fpk
+          name: GFCW-${{ steps.manifest.outputs.version }}-x86-fpk
+          path: GFCW-${{ steps.manifest.outputs.version }}-x86.fpk
           retention-days: 30
 
       - name: Upload arm fpk artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-arm-fpk
-          path: GUI.for.Clash.Web-${{ steps.manifest.outputs.version }}-arm.fpk
+          name: GFCW-${{ steps.manifest.outputs.version }}-arm-fpk
+          path: GFCW-${{ steps.manifest.outputs.version }}-arm.fpk
           retention-days: 30
 
       - name: Upload x86 binary artifact
@@ -142,8 +142,8 @@ jobs:
           name: v${{ steps.manifest.outputs.version }}
           body: ${{ steps.changelog.outputs.changelog }}
           files: |
-            GUI.for.Clash.Web-*-x86.fpk
-            GUI.for.Clash.Web-*-arm.fpk
+            GFCW-*-x86.fpk
+            GFCW-*-arm.fpk
             GUI-for-Clash-Web-linux-amd64
             GUI-for-Clash-Web-linux-arm64
           draft: false
@@ -155,10 +155,10 @@ jobs:
           FnDepot_TOKEN: ${{ secrets.FnDepot_TOKEN }}
         run: |
           VERSION="${{ steps.manifest.outputs.version }}"
-          DOWNLOAD_URL_X86="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/GUI.for.Clash.Web-${VERSION}-x86.fpk"
-          DOWNLOAD_URL_ARM="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/GUI.for.Clash.Web-${VERSION}-arm.fpk"
+          DOWNLOAD_URL_X86="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/GFCW-${VERSION}-x86.fpk"
+          DOWNLOAD_URL_ARM="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/GFCW-${VERSION}-arm.fpk"
           
-          FILE_SIZE_BYTES=$(stat -c%s GUI.for.Clash.Web-${VERSION}-x86.fpk)
+          FILE_SIZE_BYTES=$(stat -c%s GFCW-${VERSION}-x86.fpk)
           SIZE=$(awk -v size="$FILE_SIZE_BYTES" 'BEGIN {printf "%.1f", size/1024/1024}')
           
           git clone https://${FnDepot_TOKEN}@github.com/yuexps/FnDepot.git temp_fndepot
@@ -168,15 +168,15 @@ jobs:
              --arg size "$SIZE" \
              --arg url_x86 "$DOWNLOAD_URL_X86" \
              --arg url_arm "$DOWNLOAD_URL_ARM" \
-             '.["GUI.for.Clash.Web"].version = $version | 
-              .["GUI.for.Clash.Web"].size = $size | 
-              .["GUI.for.Clash.Web"].arch_diff.x86.download_url = $url_x86 | 
-              .["GUI.for.Clash.Web"].arch_diff.arm.download_url = $url_arm' \
+             '.["GFCW"].version = $version | 
+              .["GFCW"].size = $size | 
+              .["GFCW"].arch_diff.x86.download_url = $url_x86 | 
+              .["GFCW"].arch_diff.arm.download_url = $url_arm' \
              fnpack.json > fnpack.json.tmp && mv fnpack.json.tmp fnpack.json
           
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
           git add fnpack.json
-          git commit -m "Update GUI.for.Clash.Web to v${VERSION}" || exit 0
+          git commit -m "Update GFCW to v${VERSION}" || exit 0
           git push
