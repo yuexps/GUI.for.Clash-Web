@@ -13,8 +13,12 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"guiforcores/bridge"
@@ -72,6 +76,27 @@ func main() {
 	// Initialize Bridge App
 	app := bridge.CreateApp(assets, workPathFlag)
 	app.Ctx = context.Background()
+
+	// 监听终止信号以优雅清理 mihomo 进程
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigChan
+		log.Printf("[App] Received signal: %v, cleaning up...", sig)
+
+		mihomoPidPath := filepath.Join(bridge.Env.BasePath, "data/mihomo/pid.txt")
+		if pidBytes, err := os.ReadFile(mihomoPidPath); err == nil {
+			pidStr := strings.TrimSpace(string(pidBytes))
+			if pid, err := strconv.Atoi(pidStr); err == nil {
+				if proc, err := os.FindProcess(pid); err == nil {
+					_ = proc.Kill()
+					log.Printf("[App] Successfully killed mihomo process (PID: %d)", pid)
+				}
+			}
+		}
+
+		os.Exit(0)
+	}()
 
 	// 初始化定时任务管理器
 	bridge.InitTaskManager(app)
